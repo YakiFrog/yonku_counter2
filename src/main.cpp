@@ -1,16 +1,81 @@
 #include <Arduino.h>
 #include <Wire.h>
+#include <WiFi.h>
 #include "Adafruit_VL6180X.h"
 
 // LEDピンの定義（PWM対応ピン）
 #define RED_LED_PIN D0    // 赤色LED（PWM対応）
 #define BLUE_LED_PIN D1   // 青色LED（PWM対応）
 
-// グローバル変数でセンサー状態を追跡
+// デバイス識別用の構造体
+struct DeviceCalibration {
+  String macAddress;
+  int deviceNumber;
+  String deviceName;
+  // 距離閾値のキャリブレーション値
+  int threshold_emergency; // 緊急（点滅）
+  int threshold_danger;    // 危険（赤）
+  int threshold_warning;   // 警告（赤中）
+  int threshold_caution;   // 注意（オレンジ）
+  int threshold_detection; // 検出（青中）
+  int threshold_far;       // 遠距離（青弱）
+  int threshold_very_far;  // 微検出（青極弱）
+};
+
+// 各デバイスのキャリブレーション設定（すべてデフォルト値）
+DeviceCalibration devices[] = {
+  {"cc:ba:97:15:4d:0c", 1, "デバイス1", 25, 40, 60, 90, 130, 180, 250},
+  {"cc:ba:97:15:53:20", 2, "デバイス2", 25, 40, 60, 90, 130, 180, 250},
+  {"cc:ba:97:15:4f:28", 3, "デバイス3", 25, 40, 60, 90, 130, 180, 250},
+  {"cc:ba:97:15:37:34", 4, "デバイス4", 25, 40, 60, 90, 130, 180, 250}
+};
+
+// グローバル変数
 bool sensorAvailable = false;
+DeviceCalibration currentDevice;
+bool deviceIdentified = false;
 
 // VL6180Xセンサーのインスタンス
 Adafruit_VL6180X vl = Adafruit_VL6180X();
+
+// デバイス識別機能
+void identifyDevice() {
+  // MACアドレスを取得
+  String macAddress = WiFi.macAddress();
+  macAddress.toLowerCase();
+  
+  Serial.print("デバイスMACアドレス: ");
+  Serial.println(macAddress);
+  
+  // デバイス配列から該当するデバイスを検索
+  for (int i = 0; i < 4; i++) {
+    if (devices[i].macAddress == macAddress) {
+      currentDevice = devices[i];
+      deviceIdentified = true;
+      Serial.print("デバイス識別完了: ");
+      Serial.print(currentDevice.deviceName);
+      Serial.print(" (番号: ");
+      Serial.print(currentDevice.deviceNumber);
+      Serial.println(")");
+      
+      // デバイス固有のキャリブレーション値を表示
+      Serial.println("キャリブレーション値:");
+      Serial.println("  緊急: " + String(currentDevice.threshold_emergency) + "mm");
+      Serial.println("  危険: " + String(currentDevice.threshold_danger) + "mm");
+      Serial.println("  警告: " + String(currentDevice.threshold_warning) + "mm");
+      Serial.println("  注意: " + String(currentDevice.threshold_caution) + "mm");
+      Serial.println("  検出: " + String(currentDevice.threshold_detection) + "mm");
+      Serial.println("  遠距離: " + String(currentDevice.threshold_far) + "mm");
+      Serial.println("  微検出: " + String(currentDevice.threshold_very_far) + "mm");
+      return;
+    }
+  }
+  
+  // 未登録のデバイスの場合はデフォルト値を使用
+  Serial.println("警告: 未登録のデバイスです。デフォルト設定を使用します。");
+  currentDevice = {"unknown", 0, "未登録デバイス", 25, 40, 60, 90, 130, 180, 250};
+  deviceIdentified = false;
+}
 
 // LEDの強度を設定する関数
 void setLEDIntensity(int redIntensity, int blueIntensity) {
@@ -23,6 +88,13 @@ void setup() {
   delay(1000); // シリアル通信の安定化待ち
   Serial.flush(); // バッファをクリア
   Serial.println("LED制御 + VL6180X ToFセンサー プログラム開始");
+  
+  // WiFiを初期化してMACアドレスを取得（接続はしない）
+  WiFi.mode(WIFI_STA);
+  delay(100);
+  
+  // デバイス識別を実行
+  identifyDevice();
   
   // I2C通信の初期化（明示的に設定）
   Wire.begin();
@@ -116,15 +188,17 @@ void loop() {
     // 距離データの出力頻度を制限（USB負荷軽減）
     static unsigned long lastPrintTime = 0;
     if (millis() - lastPrintTime > 500) { // 500msごと（2Hz）に距離を出力
-      Serial.print("距離: ");
+      Serial.print("[");
+      Serial.print(currentDevice.deviceName);
+      Serial.print("] 距離: ");
       Serial.print(range);
       Serial.println(" mm");
       lastPrintTime = millis();
     }
     
-    // 距離に応じてLEDの強度を変更（顕著な色の差）
-    if (range < 25) {
-      // 25mm未満: 赤色LED最大強度＋点滅効果（緊急危険）
+    // 個別キャリブレーション値を使用した距離判定
+    if (range < currentDevice.threshold_emergency) {
+      // 緊急距離未満: 赤色LED最大強度＋点滅効果（緊急危険）
       static unsigned long lastFlashTime = 0;
       static bool flashState = false;
       if (millis() - lastFlashTime > 100) { // 100msごとに点滅
@@ -132,26 +206,26 @@ void loop() {
         setLEDIntensity(flashState ? 255 : 200, 0);
         lastFlashTime = millis();
       }
-    } else if (range < 40) {
-      // 25-40mm: 赤色LED最大強度（非常に危険）
+    } else if (range < currentDevice.threshold_danger) {
+      // 危険距離: 赤色LED最大強度（非常に危険）
       setLEDIntensity(255, 0);
-    } else if (range < 60) {
-      // 40-60mm: 赤色LED中強度（警告）
+    } else if (range < currentDevice.threshold_warning) {
+      // 警告距離: 赤色LED中強度（警告）
       setLEDIntensity(180, 0);
-    } else if (range < 90) {
-      // 60-90mm: オレンジ色（赤＋青の混合）で注意
+    } else if (range < currentDevice.threshold_caution) {
+      // 注意距離: オレンジ色（赤＋青の混合）で注意
       setLEDIntensity(200, 30);
-    } else if (range < 130) {
-      // 90-130mm: 青色LED中強度（検出）
+    } else if (range < currentDevice.threshold_detection) {
+      // 検出距離: 青色LED中強度（検出）
       setLEDIntensity(0, 200);
-    } else if (range < 180) {
-      // 130-180mm: 青色LED弱（遠距離検出）
+    } else if (range < currentDevice.threshold_far) {
+      // 遠距離: 青色LED弱（遠距離検出）
       setLEDIntensity(0, 100);
-    } else if (range < 250) {
-      // 180-250mm: 青色LED非常に弱（微検出）
+    } else if (range < currentDevice.threshold_very_far) {
+      // 微検出距離: 青色LED非常に弱（微検出）
       setLEDIntensity(0, 30);
     } else {
-      // 250mm以上: 両方のLEDを消灯（安全距離）
+      // 安全距離以上: 両方のLEDを消灯（安全距離）
       setLEDIntensity(0, 0);
     }
   } else {
@@ -165,16 +239,53 @@ void loop() {
     }
   }
   } else {
-    // センサーなしモード：LEDテストパターン表示
+    // センサーなしモード：デバイス番号に応じたLEDテストパターン表示
     static unsigned long lastPatternTime = 0;
     static int patternStep = 0;
     
     if (millis() - lastPatternTime > 1000) { // 1秒ごとにパターン変更
-      switch (patternStep % 4) {
-        case 0: setLEDIntensity(50, 0); break;   // 赤弱
-        case 1: setLEDIntensity(0, 50); break;   // 青弱  
-        case 2: setLEDIntensity(25, 25); break; // 両方弱
-        case 3: setLEDIntensity(0, 0); break;   // 消灯
+      // デバイス番号に応じて異なるパターンを表示
+      switch (currentDevice.deviceNumber) {
+        case 1: // デバイス1: 赤色パターン
+          switch (patternStep % 4) {
+            case 0: setLEDIntensity(100, 0); break;  // 赤中
+            case 1: setLEDIntensity(50, 0); break;   // 赤弱
+            case 2: setLEDIntensity(200, 0); break;  // 赤強
+            case 3: setLEDIntensity(0, 0); break;    // 消灯
+          }
+          break;
+        case 2: // デバイス2: 青色パターン
+          switch (patternStep % 4) {
+            case 0: setLEDIntensity(0, 100); break;  // 青中
+            case 1: setLEDIntensity(0, 50); break;   // 青弱
+            case 2: setLEDIntensity(0, 200); break;  // 青強
+            case 3: setLEDIntensity(0, 0); break;    // 消灯
+          }
+          break;
+        case 3: // デバイス3: 交互パターン
+          switch (patternStep % 4) {
+            case 0: setLEDIntensity(100, 0); break;  // 赤
+            case 1: setLEDIntensity(0, 100); break;  // 青
+            case 2: setLEDIntensity(100, 0); break;  // 赤
+            case 3: setLEDIntensity(0, 0); break;    // 消灯
+          }
+          break;
+        case 4: // デバイス4: 混合パターン
+          switch (patternStep % 4) {
+            case 0: setLEDIntensity(100, 100); break; // 紫
+            case 1: setLEDIntensity(50, 50); break;   // 紫弱
+            case 2: setLEDIntensity(150, 30); break;  // オレンジ
+            case 3: setLEDIntensity(0, 0); break;     // 消灯
+          }
+          break;
+        default: // 未登録デバイス: デフォルトパターン
+          switch (patternStep % 4) {
+            case 0: setLEDIntensity(50, 0); break;   // 赤弱
+            case 1: setLEDIntensity(0, 50); break;   // 青弱  
+            case 2: setLEDIntensity(25, 25); break; // 両方弱
+            case 3: setLEDIntensity(0, 0); break;   // 消灯
+          }
+          break;
       }
       patternStep++;
       lastPatternTime = millis();
