@@ -12,22 +12,16 @@ struct DeviceCalibration {
   String macAddress;
   int deviceNumber;
   String deviceName;
-  // 距離閾値のキャリブレーション値
-  int threshold_emergency; // 緊急（点滅）
-  int threshold_danger;    // 危険（赤）
-  int threshold_warning;   // 警告（赤中）
-  int threshold_caution;   // 注意（オレンジ）
-  int threshold_detection; // 検出（青中）
-  int threshold_far;       // 遠距離（青弱）
-  int threshold_very_far;  // 微検出（青極弱）
+  // オフセットキャリブレーション値
+  int offsetCalibration;   // オフセット補正値（mm）
 };
 
-// 各デバイスのキャリブレーション設定（すべてデフォルト値）
+// 各デバイスのキャリブレーション設定（オフセット値を個別に設定可能）
 DeviceCalibration devices[] = {
-  {"cc:ba:97:15:4d:0c", 1, "デバイス1", 25, 40, 60, 90, 130, 180, 250},
-  {"cc:ba:97:15:53:20", 2, "デバイス2", 25, 40, 60, 90, 130, 180, 250},
-  {"cc:ba:97:15:4f:28", 3, "デバイス3", 25, 40, 60, 90, 130, 180, 250},
-  {"cc:ba:97:15:37:34", 4, "デバイス4", 25, 40, 60, 90, 130, 180, 250}
+  {"cc:ba:97:15:4d:0c", 1, "デバイス1", 125},
+  {"cc:ba:97:15:53:20", 2, "デバイス2", 55},
+  {"cc:ba:97:15:4f:28", 3, "デバイス3", -5},
+  {"cc:ba:97:15:37:34", 4, "デバイス4", 0}
 };
 
 // グローバル変数
@@ -58,22 +52,17 @@ void identifyDevice() {
       Serial.print(currentDevice.deviceNumber);
       Serial.println(")");
       
-      // デバイス固有のキャリブレーション値を表示
-      Serial.println("キャリブレーション値:");
-      Serial.println("  緊急: " + String(currentDevice.threshold_emergency) + "mm");
-      Serial.println("  危険: " + String(currentDevice.threshold_danger) + "mm");
-      Serial.println("  警告: " + String(currentDevice.threshold_warning) + "mm");
-      Serial.println("  注意: " + String(currentDevice.threshold_caution) + "mm");
-      Serial.println("  検出: " + String(currentDevice.threshold_detection) + "mm");
-      Serial.println("  遠距離: " + String(currentDevice.threshold_far) + "mm");
-      Serial.println("  微検出: " + String(currentDevice.threshold_very_far) + "mm");
+      // デバイス固有のオフセット値を表示
+      Serial.print("オフセット値: ");
+      Serial.print(currentDevice.offsetCalibration);
+      Serial.println("mm");
       return;
     }
   }
   
   // 未登録のデバイスの場合はデフォルト値を使用
   Serial.println("警告: 未登録のデバイスです。デフォルト設定を使用します。");
-  currentDevice = {"unknown", 0, "未登録デバイス", 25, 40, 60, 90, 130, 180, 250};
+  currentDevice = {"unknown", 0, "未登録デバイス", 0};
   deviceIdentified = false;
 }
 
@@ -81,6 +70,80 @@ void identifyDevice() {
 void setLEDIntensity(int redIntensity, int blueIntensity) {
   analogWrite(RED_LED_PIN, redIntensity);   // 0-255の範囲
   analogWrite(BLUE_LED_PIN, blueIntensity); // 0-255の範囲
+}
+
+// オフセットキャリブレーション機能
+void calibrateOffset() {
+  if (!sensorAvailable) {
+    Serial.println("センサーが利用できません。");
+    return;
+  }
+  
+  Serial.println("=== オフセットキャリブレーション開始 ===");
+  Serial.println("センサーから10mmの位置に基準物体を設置してください。");
+  Serial.println("準備ができたら任意のキーを押してください...");
+  
+  // シリアル入力待ち
+  while (!Serial.available()) {
+    delay(100);
+  }
+  Serial.read(); // バッファをクリア
+  
+  // 複数回測定して平均値を取得
+  int measurements = 10;
+  int totalRange = 0;
+  int validMeasurements = 0;
+  
+  Serial.println("測定開始...");
+  for (int i = 0; i < measurements; i++) {
+    uint8_t range = vl.readRange();
+    uint8_t status = vl.readRangeStatus();
+    
+    if (status == VL6180X_ERROR_NONE) {
+      totalRange += range;
+      validMeasurements++;
+      Serial.print("測定 ");
+      Serial.print(i + 1);
+      Serial.print(": ");
+      Serial.print(range);
+      Serial.println("mm");
+    } else {
+      Serial.print("測定 ");
+      Serial.print(i + 1);
+      Serial.println(": エラー");
+    }
+    delay(200);
+  }
+  
+  if (validMeasurements > 0) {
+    int averageRange = totalRange / validMeasurements;
+    int offset = averageRange - 10; // 10mmが基準
+    
+    Serial.print("平均測定値: ");
+    Serial.print(averageRange);
+    Serial.println("mm");
+    Serial.print("計算されたオフセット: ");
+    Serial.print(offset);
+    Serial.println("mm");
+    
+    // オフセットを設定
+    vl.setOffset(offset);
+    
+    // 検証測定
+    delay(500);
+    uint8_t verifyRange = vl.readRange();
+    Serial.print("検証測定: ");
+    Serial.print(verifyRange);
+    Serial.println("mm");
+    
+    Serial.println("オフセットキャリブレーション完了");
+    Serial.print("この値をコードに保存してください: ");
+    Serial.println(offset);
+  } else {
+    Serial.println("有効な測定値が取得できませんでした。");
+  }
+  
+  Serial.println("=== キャリブレーション終了 ===");
 }
 
 void setup() {
@@ -153,8 +216,17 @@ void setup() {
     Serial.println("センサーなしモードで動作します。");
     // センサーなしでも動作継続（無限ループを回避）
   } else {
+    // デバイス固有のオフセットを適用
+    if (currentDevice.offsetCalibration != 0) {
+      vl.setOffset(currentDevice.offsetCalibration);
+      Serial.print("オフセット適用: ");
+      Serial.print(currentDevice.offsetCalibration);
+      Serial.println("mm");
+    }
+    
     // 単発測定モードで安定性向上
     Serial.println("単発測定モード開始");
+    Serial.println("キャリブレーションを実行する場合は 'c' を送信してください");
   }
   
   // 初期化完了を示すLED点滅
@@ -170,6 +242,18 @@ void setup() {
 }
 
 void loop() {
+  // キャリブレーションコマンドチェック
+  if (Serial.available() > 0) {
+    char command = Serial.read();
+    if (command == 'c' || command == 'C') {
+      calibrateOffset();
+      // バッファをクリア
+      while (Serial.available()) {
+        Serial.read();
+      }
+    }
+  }
+  
   // 生存確認用のハートビート（デバッグ用）- 一時的に無効化
   // static unsigned long lastHeartbeat = 0;
   // if (millis() - lastHeartbeat > 5000) { // 5秒ごとに変更（負荷軽減）
@@ -196,8 +280,8 @@ void loop() {
       lastPrintTime = millis();
     }
     
-    // 個別キャリブレーション値を使用した距離判定
-    if (range < currentDevice.threshold_emergency) {
+    // 距離判定（固定閾値を使用）
+    if (range < 25) {
       // 緊急距離未満: 赤色LED最大強度＋点滅効果（緊急危険）
       static unsigned long lastFlashTime = 0;
       static bool flashState = false;
@@ -206,22 +290,22 @@ void loop() {
         setLEDIntensity(flashState ? 255 : 200, 0);
         lastFlashTime = millis();
       }
-    } else if (range < currentDevice.threshold_danger) {
+    } else if (range < 40) {
       // 危険距離: 赤色LED最大強度（非常に危険）
       setLEDIntensity(255, 0);
-    } else if (range < currentDevice.threshold_warning) {
+    } else if (range < 60) {
       // 警告距離: 赤色LED中強度（警告）
       setLEDIntensity(180, 0);
-    } else if (range < currentDevice.threshold_caution) {
+    } else if (range < 90) {
       // 注意距離: オレンジ色（赤＋青の混合）で注意
       setLEDIntensity(200, 30);
-    } else if (range < currentDevice.threshold_detection) {
+    } else if (range < 130) {
       // 検出距離: 青色LED中強度（検出）
       setLEDIntensity(0, 200);
-    } else if (range < currentDevice.threshold_far) {
+    } else if (range < 180) {
       // 遠距離: 青色LED弱（遠距離検出）
       setLEDIntensity(0, 100);
-    } else if (range < currentDevice.threshold_very_far) {
+    } else if (range < 250) {
       // 微検出距離: 青色LED非常に弱（微検出）
       setLEDIntensity(0, 30);
     } else {
@@ -299,6 +383,5 @@ void loop() {
     lastFlushTime = millis();
   }
   
-  // 30Hzで動作（約33.3ms）
-  delay(33); // 33ms
+  delay(20);
 }
