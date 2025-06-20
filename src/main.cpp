@@ -21,6 +21,7 @@ void setLEDIntensity(int redIntensity, int blueIntensity) {
 void setup() {
   Serial.begin(115200);
   delay(1000); // シリアル通信の安定化待ち
+  Serial.flush(); // バッファをクリア
   Serial.println("LED制御 + VL6180X ToFセンサー プログラム開始");
   
   // I2C通信の初期化（明示的に設定）
@@ -46,7 +47,7 @@ void setup() {
   Serial.println("VL6180Xセンサー初期化開始...");
   
   int retryCount = 0;
-  const int maxRetries = 5;
+  const int maxRetries = 10;
   bool sensorInitialized = false;
   
   while (retryCount < maxRetries && !sensorInitialized) {
@@ -80,9 +81,8 @@ void setup() {
     Serial.println("センサーなしモードで動作します。");
     // センサーなしでも動作継続（無限ループを回避）
   } else {
-    // 高速測定のための設定
-    vl.startRangeContinuous(10);  // 10ms間隔で連続測定
-    Serial.println("高速測定モード開始");
+    // 単発測定モードで安定性向上
+    Serial.println("単発測定モード開始");
   }
   
   // 初期化完了を示すLED点滅
@@ -98,32 +98,40 @@ void setup() {
 }
 
 void loop() {
-  // 生存確認用のハートビート（デバッグ用）
-  static unsigned long lastHeartbeat = 0;
-  if (millis() - lastHeartbeat > 1000) {
-    Serial.println("ハートビート - ループ実行中");
-    lastHeartbeat = millis();
-  }
+  // 生存確認用のハートビート（デバッグ用）- 一時的に無効化
+  // static unsigned long lastHeartbeat = 0;
+  // if (millis() - lastHeartbeat > 5000) { // 5秒ごとに変更（負荷軽減）
+  //   Serial.println("ハートビート - ループ実行中");
+  //   lastHeartbeat = millis();
+  // }
   
   // センサーが利用可能な場合のみセンサー読み取りを実行
   if (sensorAvailable) {
-    // VL6180Xセンサーから距離を読み取り（連続測定モード使用）
+    // VL6180Xセンサーから距離を読み取り（単発測定モード使用）
     uint8_t range = vl.readRange();
     uint8_t status = vl.readRangeStatus();
   
   // 測定エラーをチェック
   if (status == VL6180X_ERROR_NONE) {
-    Serial.print("距離: ");
-    Serial.print(range);
-    Serial.println(" mm");
+    // 距離データの出力頻度を制限（USB負荷軽減）
+    static unsigned long lastPrintTime = 0;
+    if (millis() - lastPrintTime > 500) { // 500msごと（2Hz）に距離を出力
+      Serial.print("距離: ");
+      Serial.print(range);
+      Serial.println(" mm");
+      lastPrintTime = millis();
+    }
     
     // 距離に応じてLEDの強度を変更（顕著な色の差）
     if (range < 25) {
       // 25mm未満: 赤色LED最大強度＋点滅効果（緊急危険）
-      setLEDIntensity(255, 0);
-      delayMicroseconds(2500);
-      setLEDIntensity(200, 0);
-      delayMicroseconds(2500);
+      static unsigned long lastFlashTime = 0;
+      static bool flashState = false;
+      if (millis() - lastFlashTime > 100) { // 100msごとに点滅
+        flashState = !flashState;
+        setLEDIntensity(flashState ? 255 : 200, 0);
+        lastFlashTime = millis();
+      }
     } else if (range < 40) {
       // 25-40mm: 赤色LED最大強度（非常に危険）
       setLEDIntensity(255, 0);
@@ -148,10 +156,13 @@ void loop() {
     }
   } else {
     // エラー時は赤色LEDを点滅
-    setLEDIntensity(255, 0);
-    delayMicroseconds(2500);
-    setLEDIntensity(0, 0);
-    delayMicroseconds(2500);
+    static unsigned long lastErrorFlashTime = 0;
+    static bool errorFlashState = false;
+    if (millis() - lastErrorFlashTime > 250) { // 250msごとに点滅
+      errorFlashState = !errorFlashState;
+      setLEDIntensity(errorFlashState ? 255 : 0, 0);
+      lastErrorFlashTime = millis();
+    }
   }
   } else {
     // センサーなしモード：LEDテストパターン表示
@@ -170,6 +181,13 @@ void loop() {
     }
   }
   
-  // 超高速動作のため最小遅延（約100Hz）
-  delayMicroseconds(10000); // 10ms
+  // シリアルバッファを定期的にフラッシュ（USB安定性向上）
+  static unsigned long lastFlushTime = 0;
+  if (millis() - lastFlushTime > 1000) { // 1秒ごと
+    Serial.flush();
+    lastFlushTime = millis();
+  }
+  
+  // 30Hzで動作（約33.3ms）
+  delay(33); // 33ms
 }
