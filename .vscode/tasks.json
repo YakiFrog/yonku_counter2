@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build Transmitter",
+			"type": "shell",
+			"command": "~/.platformio/penv/bin/platformio",
+			"args": [
+				"run",
+				"-e",
+				"transmitter"
+			],
+			"group": "build"
+		}
+	]
+}

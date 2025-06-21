@@ -16,12 +16,12 @@ struct DeviceCalibration {
   int offsetCalibration;   // オフセット補正値（mm）
 };
 
-// 各デバイスのキャリブレーション設定（オフセット値を個別に設定可能）
+// 各デバイスのキャリブレーション設定（WiFi MACアドレスベース）
 DeviceCalibration devices[] = {
   {"cc:ba:97:15:4d:0c", 1, "デバイス1", 125},
-  {"cc:ba:97:15:53:20", 2, "デバイス2", 55},
+  {"cc:ba:97:15:53:20", 2, "デバイス2", 55},  // WiFi MACアドレスに戻す
   {"cc:ba:97:15:4f:28", 3, "デバイス3", -5},
-  {"cc:ba:97:15:37:35", 4, "デバイス4", 0}  // 修正: 35に変更
+  {"cc:ba:97:15:37:34", 4, "デバイス4", 0}   // WiFi MACアドレス
 };
 
 // グローバル変数
@@ -34,16 +34,29 @@ Adafruit_VL6180X vl = Adafruit_VL6180X();
 
 // デバイス識別機能
 void identifyDevice() {
-  // MACアドレスを取得
-  String macAddress = WiFi.macAddress();
-  macAddress.toLowerCase();
+  // WiFi MACアドレスを取得
+  String wifiMacAddress = WiFi.macAddress();
+  wifiMacAddress.toLowerCase();
   
-  Serial.print("デバイスMACアドレス: ");
-  Serial.println(macAddress);
+  Serial.print("WiFi MACアドレス: ");
+  Serial.println(wifiMacAddress);
   
-  // デバイス配列から該当するデバイスを検索
+  // Bluetooth MACアドレスも表示（参考用）
+  String btMacStr = "";
+  uint8_t btMac[6];
+  esp_read_mac(btMac, ESP_MAC_BT);
+  for (int i = 0; i < 6; i++) {
+    if (i > 0) btMacStr += ":";
+    if (btMac[i] < 0x10) btMacStr += "0";
+    btMacStr += String(btMac[i], HEX);
+  }
+  btMacStr.toLowerCase();
+  Serial.print("Bluetooth MACアドレス: ");
+  Serial.println(btMacStr);
+  
+  // デバイス配列から該当するデバイスを検索（WiFi MACで識別）
   for (int i = 0; i < 4; i++) {
-    if (devices[i].macAddress == macAddress) {
+    if (devices[i].macAddress == wifiMacAddress) {
       currentDevice = devices[i];
       deviceIdentified = true;
       Serial.print("デバイス識別完了: ");

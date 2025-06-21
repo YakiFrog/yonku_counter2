@@ -7,120 +7,133 @@
 #include <BLE2902.h>
 #include "Adafruit_VL6180X.h"
 
-// BLEの設定
+// BLE settings
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-// LEDピンの定義（PWM対応ピン）
-#define RED_LED_PIN D0    // 赤色LED（PWM対応）
-#define BLUE_LED_PIN D1   // 青色LED（PWM対応）
+// LED pin definitions (PWM compatible pins)
+#define RED_LED_PIN D0    // Red LED (PWM compatible)
+#define BLUE_LED_PIN D1   // Blue LED (PWM compatible)
 
-// デバイス識別用の構造体
+// Device identification structure
 struct DeviceCalibration {
   String macAddress;
   int deviceNumber;
   String deviceName;
-  // オフセットキャリブレーション値
-  int offsetCalibration;   // オフセット補正値（mm）
+  // Offset calibration values
+  int offsetCalibration;   // Offset correction value (mm)
 };
 
-// 各デバイスのキャリブレーション設定（オフセット値を個別に設定可能）
+// Each device calibration settings (WiFi MAC address based)
 DeviceCalibration devices[] = {
-  {"cc:ba:97:15:4d:0c", 1, "デバイス1", 125},
-  {"cc:ba:97:15:53:20", 2, "デバイス2", 55},
-  {"cc:ba:97:15:4f:28", 3, "デバイス3", -5},
-  {"cc:ba:97:15:37:35", 4, "デバイス4", 0}  // 修正: 35に変更
+  {"cc:ba:97:15:4d:0c", 1, "Device1", 125},
+  {"cc:ba:97:15:53:20", 2, "Device2", 55},  // WiFi MAC address
+  {"cc:ba:97:15:4f:28", 3, "Device3", -5},
+  {"cc:ba:97:15:37:34", 4, "Device4", 0} 
 };
 
-// BLE関連変数
+// BLE related variables
 BLEServer* pServer = NULL;
 BLECharacteristic* pCharacteristic = NULL;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
-// グローバル変数
+// Global variables
 bool sensorAvailable = false;
 DeviceCalibration currentDevice;
 bool deviceIdentified = false;
 
-// VL6180Xセンサーのインスタンス
+// VL6180X sensor instance
 Adafruit_VL6180X vl = Adafruit_VL6180X();
 
-// 基準距離とカウント関連
-int baselineDistance = 0;        // 何も通っていない状態の基準距離
+// Baseline distance and count related variables
+int baselineDistance = 0;        // Baseline distance when nothing is passing through
 bool baselineCalibrated = false;
-int deviceCount = 0;             // このデバイスのカウント
-unsigned long lastCountTime = 0; // 最後にカウントした時刻
-const unsigned long COUNT_IGNORE_DURATION = 3000; // 3秒間重複カウント防止
-const int DETECTION_THRESHOLD = 15; // 検出閾値（基準距離からの差分mm）
+int deviceCount = 0;             // Count for this device
+unsigned long lastCountTime = 0; // Last time a count was made
+const unsigned long COUNT_IGNORE_DURATION = 3000; // 3-second duplicate count prevention
+const int DETECTION_THRESHOLD = 15; // Detection threshold (difference from baseline distance mm)
 
-// LED制御関連
-bool countUpLEDActive = false;   // カウントアップ時の点滅制御
-unsigned long countUpLEDStartTime = 0; // カウントアップ時LED開始時刻
-const unsigned long COUNT_UP_LED_DURATION = 3000; // 3秒間点滅
+// LED control related variables
+bool countUpLEDActive = false;   // Count-up blink control
+unsigned long countUpLEDStartTime = 0; // Count-up LED start time
+const unsigned long COUNT_UP_LED_DURATION = 3000; // 3-second blink duration
 
-// BLE接続状態管理用コールバッククラス
+// BLE connection state management callback class
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
-      Serial.println("*** BLEクライアントが接続されました ***");
+      Serial.println("*** BLE client connected ***");
     };
 
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
-      Serial.println("*** BLEクライアントが切断されました ***");
+      Serial.println("*** BLE client disconnected ***");
     }
 };
 
-// デバイス識別機能
+// Device identification function
 void identifyDevice() {
-  // MACアドレスを取得
-  String macAddress = WiFi.macAddress();
-  macAddress.toLowerCase();
+  // Get WiFi MAC address
+  String wifiMacAddress = WiFi.macAddress();
+  wifiMacAddress.toLowerCase();
   
-  Serial.print("デバイスMACアドレス: ");
-  Serial.println(macAddress);
+  Serial.print("WiFi MAC address: ");
+  Serial.println(wifiMacAddress);
   
-  // デバイス配列から該当するデバイスを検索
+  // Also display Bluetooth MAC address (for reference)
+  String btMacStr = "";
+  uint8_t btMac[6];
+  esp_read_mac(btMac, ESP_MAC_BT);
+  for (int i = 0; i < 6; i++) {
+    if (i > 0) btMacStr += ":";
+    if (btMac[i] < 0x10) btMacStr += "0";
+    btMacStr += String(btMac[i], HEX);
+  }
+  btMacStr.toLowerCase();
+  Serial.print("Bluetooth MAC address: ");
+  Serial.println(btMacStr);
+  
+  // Search device array for matching device (identify by WiFi MAC)
   for (int i = 0; i < 4; i++) {
-    if (devices[i].macAddress == macAddress) {
+    if (devices[i].macAddress == wifiMacAddress) {
       currentDevice = devices[i];
       deviceIdentified = true;
-      Serial.print("デバイス識別完了: ");
+      Serial.print("Device identification completed: ");
       Serial.print(currentDevice.deviceName);
-      Serial.print(" (番号: ");
+      Serial.print(" (number: ");
       Serial.print(currentDevice.deviceNumber);
       Serial.println(")");
       
-      // デバイス固有のオフセット値を表示
-      Serial.print("オフセット値: ");
+      // Display device-specific offset value
+      Serial.print("Offset value: ");
       Serial.print(currentDevice.offsetCalibration);
       Serial.println("mm");
       return;
     }
   }
   
-  // 未登録のデバイスの場合はデフォルト値を使用
-  Serial.println("警告: 未登録のデバイスです。デフォルト設定を使用します。");
-  currentDevice = {"unknown", 0, "未登録デバイス", 0};
+  // Use default values for unregistered devices
+  Serial.println("WARNING: Unregistered device. Using default settings.");
+  currentDevice = {"unknown", 0, "Unknown Device", 0};
   deviceIdentified = false;
 }
 
-// LEDの強度を設定する関数
+// LED intensity setting function
 void setLEDIntensity(int redIntensity, int blueIntensity) {
-  analogWrite(RED_LED_PIN, redIntensity);   // 0-255の範囲
-  analogWrite(BLUE_LED_PIN, blueIntensity); // 0-255の範囲
+  analogWrite(RED_LED_PIN, redIntensity);   // 0-255 range
+  analogWrite(BLUE_LED_PIN, blueIntensity); // 0-255 range
 }
 
-// BLE初期化
+// BLE initialization
 void initBLE() {
   String deviceName = "YonkuCounter_" + String(currentDevice.deviceNumber);
   
   BLEDevice::init(deviceName.c_str());
   
-  // BLE送信パワーを最大に設定（接続安定性向上）
-  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9); // 出力パワーを最大(+9dBm)に設定
-  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);     // アドバタイジングの出力も最大に
+  // Set BLE transmission power to maximum (improve connection stability)
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9); // Set output power to maximum (+9dBm)
+  esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);     // Set advertising output to maximum
   
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new MyServerCallbacks());
@@ -141,33 +154,33 @@ void initBLE() {
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
   pAdvertising->addServiceUUID(SERVICE_UUID);
   pAdvertising->setScanResponse(true);
-  pAdvertising->setMinPreferred(0x0);  // iOS接続性向上（旧プロジェクト設定）
+  pAdvertising->setMinPreferred(0x0);  // Improve iOS connectivity
   BLEDevice::startAdvertising();
   
-  Serial.println("BLE初期化完了 - " + deviceName);
-  Serial.println("アドバタイジング開始 - 接続を待機中...");
-  Serial.print("サービスUUID: ");
+  Serial.println("BLE initialization complete - " + deviceName);
+  Serial.println("Advertising started - waiting for connection...");
+  Serial.print("Service UUID: ");
   Serial.println(SERVICE_UUID);
-  Serial.print("キャラクタリスティックUUID: ");
+  Serial.print("Characteristic UUID: ");
   Serial.println(CHARACTERISTIC_UUID);
 }
 
-// 基準距離キャリブレーション機能
+// Baseline distance calibration function
 void calibrateBaseline() {
   if (!sensorAvailable) {
-    Serial.println("センサーが利用できません。基準距離設定をスキップします。");
+    Serial.println("Sensor not available. Skipping baseline distance setup.");
     return;
   }
   
-  Serial.println("=== 基準距離キャリブレーション開始 ===");
-  Serial.println("レーンに何も置かない状態で基準距離を測定します...");
+  Serial.println("=== Baseline Distance Calibration Start ===");
+  Serial.println("Measuring baseline distance with nothing in the lane...");
   
-  // 複数回測定して平均値を取得
+  // Take multiple measurements and get average
   int measurements = 20;
   int totalRange = 0;
   int validMeasurements = 0;
   
-  Serial.println("測定開始...");
+  Serial.println("Starting measurements...");
   for (int i = 0; i < measurements; i++) {
     uint8_t range = vl.readRange();
     uint8_t status = vl.readRangeStatus();
@@ -175,66 +188,66 @@ void calibrateBaseline() {
     if (status == VL6180X_ERROR_NONE) {
       totalRange += range;
       validMeasurements++;
-      Serial.print("測定 ");
+      Serial.print("Measurement ");
       Serial.print(i + 1);
       Serial.print(": ");
       Serial.print(range);
       Serial.println("mm");
     } else {
-      Serial.print("測定 ");
+      Serial.print("Measurement ");
       Serial.print(i + 1);
-      Serial.println(": エラー");
+      Serial.println(": Error");
     }
     delay(100);
   }
   
-  if (validMeasurements >= measurements / 2) { // 半分以上の測定が成功した場合
+  if (validMeasurements >= measurements / 2) { // If more than half of measurements succeeded
     baselineDistance = totalRange / validMeasurements;
     baselineCalibrated = true;
     
-    Serial.print("基準距離設定完了: ");
+    Serial.print("Baseline distance setup complete: ");
     Serial.print(baselineDistance);
     Serial.println("mm");
-    Serial.print("検出閾値: ");
-    Serial.print(baselineDistance - DETECTION_THRESHOLD); // 基準より閾値分小さい値で検出
-    Serial.println("mm以下");
+    Serial.print("Detection threshold: ");
+    Serial.print(baselineDistance - DETECTION_THRESHOLD); // Detect when value is threshold below baseline
+    Serial.println("mm or less");
   } else {
-    Serial.println("基準距離の設定に失敗しました。固定値を使用します。");
-    baselineDistance = 200; // デフォルト値
+    Serial.println("Failed to set baseline distance. Using fixed value.");
+    baselineDistance = 200; // Default value
     baselineCalibrated = false;
   }
   
-  Serial.println("=== 基準距離キャリブレーション終了 ===");
+  Serial.println("=== Baseline Distance Calibration End ===");
 }
 
 void setup() {
   Serial.begin(115200);
-  delay(1000); // シリアル通信の安定化待ち
-  Serial.flush(); // バッファをクリア
-  Serial.println("Yonku Counter Receiver (個別センサー) プログラム開始");
+  delay(1000); // Wait for serial communication stabilization
+  Serial.flush(); // Clear buffer
+  Serial.println("Yonku Counter Receiver (Individual Sensor) Program Starting");
   
-  // WiFiを初期化してMACアドレスを取得（接続はしない）
+  // Initialize WiFi to get MAC address (without connecting)
   WiFi.mode(WIFI_STA);
   delay(100);
   
-  // デバイス識別を実行
+  // Execute device identification
   identifyDevice();
   
-  // BLE初期化
+  // BLE initialization
   initBLE();
   
-  // I2C通信の初期化（明示的に設定）
+  // Initialize I2C communication (explicit setting)
   Wire.begin();
-  Wire.setClock(100000); // I2Cクロックを100kHzに設定（安定性向上）
+  Wire.setClock(100000); // Set I2C clock to 100kHz (improve stability)
   
-  // LEDピンを出力モードに設定（センサー初期化前に設定）
+  // Set LED pins to output mode (before sensor initialization)
   pinMode(RED_LED_PIN, OUTPUT);
   pinMode(BLUE_LED_PIN, OUTPUT);
   
-  // 初期状態では両方のLEDを消灯
+  // Turn off both LEDs initially
   setLEDIntensity(0, 0);
   
-  // 起動状態を示すLED点滅
+  // LED blinking to indicate startup
   for(int i = 0; i < 3; i++) {
     setLEDIntensity(0, 100);
     delay(200);
@@ -242,8 +255,8 @@ void setup() {
     delay(200);
   }
   
-  // VL6180Xセンサーの初期化（タイムアウト付き）
-  Serial.println("VL6180Xセンサー初期化開始...");
+  // VL6180X sensor initialization (with timeout)
+  Serial.println("Starting VL6180X sensor initialization...");
   
   int retryCount = 0;
   const int maxRetries = 10;
@@ -252,218 +265,218 @@ void setup() {
   while (retryCount < maxRetries && !sensorInitialized) {
     if (vl.begin()) {
       sensorInitialized = true;
-      sensorAvailable = true; // センサー初期化成功
-      Serial.println("VL6180Xセンサー初期化完了");
+      sensorAvailable = true; // Sensor initialization successful
+      Serial.println("VL6180X sensor initialization complete");
     } else {
       retryCount++;
-      Serial.print("VL6180X初期化失敗 (試行 ");
+      Serial.print("VL6180X initialization failed (attempt ");
       Serial.print(retryCount);
       Serial.print("/");
       Serial.print(maxRetries);
       Serial.println(")");
       
-      // エラー状態を示すLED点滅
+      // LED blinking to indicate error state
       setLEDIntensity(255, 0);
       delay(500);
       setLEDIntensity(0, 0);
       delay(500);
       
       if (retryCount < maxRetries) {
-        Serial.println("2秒後に再試行...");
+        Serial.println("Retrying in 2 seconds...");
         delay(2000);
       }
     }
   }
   
   if (!sensorInitialized) {
-    Serial.println("VL6180Xセンサーの初期化に失敗しました。");
-    Serial.println("センサーなしモードで動作します。");
-    // センサーなしでも動作継続（無限ループを回避）
+    Serial.println("VL6180X sensor initialization failed.");
+    Serial.println("Operating in sensor-less mode.");
+    // Continue operation without sensor (avoid infinite loop)
   } else {
-    // デバイス固有のオフセットを適用
+    // Apply device-specific offset
     if (currentDevice.offsetCalibration != 0) {
       vl.setOffset(currentDevice.offsetCalibration);
-      Serial.print("オフセット適用: ");
+      Serial.print("Offset applied: ");
       Serial.print(currentDevice.offsetCalibration);
       Serial.println("mm");
     }
     
-    // 単発測定モードで安定性向上
-    Serial.println("単発測定モード開始");
-    Serial.println("基準距離キャリブレーションを実行します...");
+    // Start single-shot measurement mode for improved stability
+    Serial.println("Single-shot measurement mode started");
+    Serial.println("Executing baseline distance calibration...");
     
-    // 基準距離キャリブレーション実行
-    delay(2000); // センサー安定化待ち
+    // Execute baseline distance calibration
+    delay(2000); // Wait for sensor stabilization
     calibrateBaseline();
     
-    Serial.println("キャリブレーションを再実行する場合は 'c' を送信してください");
+    Serial.println("To re-run calibration, send 'c'");
   }
   
-  // 初期化完了を示すLED点滅
+  // LED blinking to indicate initialization complete
   for(int i = 0; i < 2; i++) {
     setLEDIntensity(0, 255);
     delay(300);
     setLEDIntensity(0, 0);
     delay(300);
   }
-  setLEDIntensity(0, 100); // 青色通常点灯で開始
+  setLEDIntensity(0, 100); // Start with normal blue lighting
   
-  Serial.println("レシーバーセットアップ完了");
+  Serial.println("Receiver setup complete");
 }
 
 void loop() {
-  // BLE接続状態の管理
+  // BLE connection state management
   if (!deviceConnected && oldDeviceConnected) {
-    delay(500); // BLEスタックに準備時間を与える
-    pServer->startAdvertising(); // 再度アドバタイジングを開始
-    Serial.println("アドバタイジング再開");
+    delay(500); // Give BLE stack time to prepare
+    pServer->startAdvertising(); // Start advertising again
+    Serial.println("Advertising restarted");
     oldDeviceConnected = deviceConnected;
   }
   if (deviceConnected && !oldDeviceConnected) {
     oldDeviceConnected = deviceConnected;
   }
 
-  // キャリブレーションコマンドチェック
+  // Check for calibration command
   if (Serial.available() > 0) {
     char command = Serial.read();
     if (command == 'c' || command == 'C') {
       calibrateBaseline();
-      // バッファをクリア
+      // Clear buffer
       while (Serial.available()) {
         Serial.read();
       }
     }
   }
   
-  // センサーが利用可能な場合のみセンサー読み取りを実行
+  // Execute sensor reading only when sensor is available
   if (sensorAvailable) {
-    // VL6180Xセンサーから距離を読み取り（単発測定モード使用）
+    // Read distance from VL6180X sensor (using single-shot measurement mode)
     uint8_t range = vl.readRange();
     uint8_t status = vl.readRangeStatus();
   
-    // 測定エラーをチェック
+    // Check for measurement errors
     if (status == VL6180X_ERROR_NONE) {
-      // 距離データの出力頻度を制限（USB負荷軽減）
+      // Limit distance data output frequency (reduce USB load)
       static unsigned long lastPrintTime = 0;
-      if (millis() - lastPrintTime > 1000) { // 1秒ごとに距離を出力
+      if (millis() - lastPrintTime > 1000) { // Output distance every second
         Serial.print("[");
         Serial.print(currentDevice.deviceName);
-        Serial.print("] 距離: ");
+        Serial.print("] Distance: ");
         Serial.print(range);
-        Serial.print("mm, カウント: ");
+        Serial.print("mm, Count: ");
         Serial.println(deviceCount);
         lastPrintTime = millis();
       }
       
-      // ミニ四駆通過判定（基準距離より閾値分以上小さい場合）
+      // Mini 4WD passage detection (when smaller than baseline distance by threshold or more)
       if (baselineCalibrated && range < (baselineDistance - DETECTION_THRESHOLD)) {
-        // 重複カウント防止チェック
+        // Duplicate count prevention check
         unsigned long currentTime = millis();
-        static bool canCountUpMessageShown = false; // カウントアップ可能メッセージの表示フラグ
+        static bool canCountUpMessageShown = false; // Flag for count-up possible message display
         
-        // 待機時間経過の判定
+        // Check if waiting time has elapsed
         bool canCountUp = (currentTime - lastCountTime > COUNT_IGNORE_DURATION);
         
-        // カウントアップ可能タイミングのメッセージ（待機時間終了時に一度だけ表示）
+        // Message for count-up possible timing (display once when waiting time ends)
         if (canCountUp && !canCountUpMessageShown) {
-          Serial.println("=== カウントアップ可能タイミング到達 ===");
-          Serial.print("前回カウントから ");
+          Serial.println("=== Count-up timing reached ===");
+          Serial.print("Elapsed since last count: ");
           Serial.print(currentTime - lastCountTime);
-          Serial.println("ms経過");
+          Serial.println("ms");
           canCountUpMessageShown = true;
         }
         
         if (canCountUp) {
           deviceCount++;
           
-          Serial.print("*** ミニ四駆通過検出！ ***");
-          Serial.print(" 距離: ");
+          Serial.print("*** Mini 4WD passage detected! ***");
+          Serial.print(" Distance: ");
           Serial.print(range);
-          Serial.print("mm (基準: ");
+          Serial.print("mm (baseline: ");
           Serial.print(baselineDistance);
-          Serial.print("mm) カウント: ");
+          Serial.print("mm) Count: ");
           Serial.println(deviceCount);
           
-          // カウントアップ時のLED制御開始
+          // Start count-up LED control
           countUpLEDActive = true;
           countUpLEDStartTime = currentTime;
-          setLEDIntensity(0, 0); // 青色を一瞬消す
+          setLEDIntensity(0, 0); // Turn off blue momentarily
           
-          // カウントアップ可能メッセージフラグをリセット（次回のカウントアップ用）
+          // Reset count-up possible message flag (for next count-up)
           canCountUpMessageShown = false;
         } else {
-          // カウントアップできない場合のログ
-          Serial.print("[カウント待機中] 距離: ");
+          // Log when count-up is not possible
+          Serial.print("[Count waiting] Distance: ");
           Serial.print(range);
-          Serial.print("mm, 待機残り時間: ");
+          Serial.print("mm, remaining wait time: ");
           Serial.print(COUNT_IGNORE_DURATION - (currentTime - lastCountTime));
           Serial.println("ms");
         }
         
-        // 基準点より小さい値が続く限り、lastCountTimeを更新して待機時間を延長
+        // Update lastCountTime to extend waiting time as long as values below baseline continue
         lastCountTime = currentTime;
         
-        // LED制御：オブジェクト検出時は赤色点灯（カウントアップ中でない場合）
+        // LED control: red light when object detected (if not during count-up)
         if (!countUpLEDActive) {
-          setLEDIntensity(255, 0); // 赤色点灯（検出中）
+          setLEDIntensity(255, 0); // Red light (detecting)
         }
       } else {
-        // 通過していない場合は通常の青色点灯
+        // Normal blue light when not passing through
         if (!countUpLEDActive) {
-          setLEDIntensity(0, 100); // 青色通常点灯
+          setLEDIntensity(0, 100); // Normal blue light
         }
       }
     } else {
-      // エラー時は赤色LEDを点滅
+      // Flash red LED during errors
       static unsigned long lastErrorFlashTime = 0;
       static bool errorFlashState = false;
-      if (millis() - lastErrorFlashTime > 250) { // 250msごとに点滅
+      if (millis() - lastErrorFlashTime > 250) { // Flash every 250ms
         errorFlashState = !errorFlashState;
         setLEDIntensity(errorFlashState ? 255 : 0, 0);
         lastErrorFlashTime = millis();
       }
     }
     
-    // カウントアップ時のLED点滅制御
+    // Count-up LED blinking control
     if (countUpLEDActive) {
       unsigned long currentTime = millis();
       unsigned long elapsedTime = currentTime - countUpLEDStartTime;
       
       if (elapsedTime < COUNT_UP_LED_DURATION) {
-        // 3秒間点滅（250msごとに点滅）
+        // Blink for 3 seconds (every 250ms)
         static unsigned long lastBlinkTime = 0;
         static bool blinkState = false;
         
         if (currentTime - lastBlinkTime > 250) {
           blinkState = !blinkState;
-          setLEDIntensity(0, blinkState ? 255 : 0); // 青色点滅
+          setLEDIntensity(0, blinkState ? 255 : 0); // Blue blinking
           lastBlinkTime = currentTime;
         }
       } else {
-        // 3秒経過後、カウントアップLED制御終了
+        // End count-up LED control after 3 seconds
         countUpLEDActive = false;
-        setLEDIntensity(0, 100); // 青色通常点灯に戻る
+        setLEDIntensity(0, 100); // Return to normal blue light
       }
     }
     
-    // BLEで常時カウントデータを送信（取りこぼし防止）
+    // Always send count data via BLE (prevent data loss)
     static unsigned long lastBLESendTime = 0;
-    if (deviceConnected && pCharacteristic && millis() - lastBLESendTime > 100) { // 100msごとに送信
+    if (deviceConnected && pCharacteristic && millis() - lastBLESendTime > 100) { // Send every 100ms
       String countData = String(currentDevice.deviceNumber) + ":" + String(deviceCount);
       pCharacteristic->setValue(countData.c_str());
       pCharacteristic->notify();
       
-      // 通信時の青色点灯（カウントアップ中でない場合のみ）
+      // Blue light during communication (only when not during count-up)
       if (!countUpLEDActive) {
         static unsigned long commLEDStartTime = 0;
         static bool commLEDActive = false;
         
         if (!commLEDActive) {
-          setLEDIntensity(0, 255); // 青色点灯
+          setLEDIntensity(0, 255); // Blue light
           commLEDStartTime = millis();
           commLEDActive = true;
-        } else if (millis() - commLEDStartTime > 50) { // 50ms点灯
-          setLEDIntensity(0, 100); // 青色通常点灯に戻る
+        } else if (millis() - commLEDStartTime > 50) { // Light for 50ms
+          setLEDIntensity(0, 100); // Return to normal blue light
           commLEDActive = false;
         }
       }
@@ -471,20 +484,20 @@ void loop() {
       lastBLESendTime = millis();
     }
   } else {
-    // センサーなしモード：青色で待機状態を表示
+    // Sensor-less mode: Display standby state with blue light
     static unsigned long lastPatternTime = 0;
     static bool patternState = false;
     
-    if (millis() - lastPatternTime > 1000) { // 1秒ごとにパターン変更
+    if (millis() - lastPatternTime > 1000) { // Change pattern every second
       patternState = !patternState;
-      setLEDIntensity(0, patternState ? 200 : 50); // 青色で明滅
+      setLEDIntensity(0, patternState ? 200 : 50); // Blue blinking
       lastPatternTime = millis();
     }
   }
   
-  // シリアルバッファを定期的にフラッシュ（USB安定性向上）
+  // Periodically flush serial buffer (improve USB stability)
   static unsigned long lastFlushTime = 0;
-  if (millis() - lastFlushTime > 1000) { // 1秒ごと
+  if (millis() - lastFlushTime > 1000) { // Every second
     Serial.flush();
     lastFlushTime = millis();
   }
