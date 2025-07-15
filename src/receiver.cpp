@@ -442,7 +442,7 @@ void loop() {
       unsigned long currentTime = millis();
       unsigned long elapsedTime = currentTime - countUpLEDStartTime;
       
-      if (elapsedTime < COUNT_UP_LED_DURATION) {
+      if (elapsedTime < COUNT_UP_LED_DURATION) { // もし，elapsedTimeが3秒未満なら
         // 3秒間点滅（250ms間隔）
         static unsigned long lastBlinkTime = 0;
         static bool blinkState = false;
@@ -461,22 +461,22 @@ void loop() {
     
     // 常にBLEでカウントデータを送信（データ消失防止）
     static unsigned long lastBLESendTime = 0;
-    if (deviceConnected && pCharacteristic && millis() - lastBLESendTime > 100) { // 100ms間隔で送信
+    if (deviceConnected && pCharacteristic && millis() - lastBLESendTime > 25) { // 1/25ms(40Hz)間隔で今のカウントを送信
       String countData = String(currentDevice.deviceNumber) + ":" + String(deviceCount);
       pCharacteristic->setValue(countData.c_str());
       pCharacteristic->notify();
-      
-      // 通信中の青色点灯（カウントアップ中でない場合のみ）
+
+      // 通信中の青色点滅（カウントアップ中でない場合のみ）
       if (!countUpLEDActive) {
         static unsigned long commLEDStartTime = 0;
         static bool commLEDActive = false;
         
         if (!commLEDActive) {
-          setLEDIntensity(0, 255); // 青色点灯
+          setLEDIntensity(0, 255); // 青色点滅
           commLEDStartTime = millis();
           commLEDActive = true;
-        } else if (millis() - commLEDStartTime > 50) { // 50ms間点灯
-          setLEDIntensity(0, 100); // 通常の青色点灯に戻す
+        } else if (millis() - commLEDStartTime > 50) { // 50ms間点滅
+          setLEDIntensity(0, 100); // 通常の青色点滅に戻す
           commLEDActive = false;
         }
       }
