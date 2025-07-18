@@ -34,6 +34,11 @@ unsigned long ledStartTime = 0;
 bool ledOn = false;
 const int LED_DURATION = 100;  // LED点灯時間（ms）
 
+// 順次ポーリング用変数
+int currentPollingDevice = 0;  // 現在ポーリング中のデバイス（0-3）
+unsigned long lastPollingTime = 0;
+const unsigned long POLLING_INTERVAL = 50;  // 50ms間隔でポーリング
+
 // 単一のコールバックインスタンス
 class MyClientCallback : public BLEClientCallbacks {
     void onConnect(BLEClient* pclient) {
@@ -59,44 +64,64 @@ class MyClientCallback : public BLEClientCallbacks {
 // グローバルコールバックインスタンス
 MyClientCallback clientCallback;
 
-// 通知コールバック
+// 通知コールバック（使用しない - ポーリングベースに変更）
 static void notifyCallback(
   BLERemoteCharacteristic* pBLERemoteCharacteristic,
   uint8_t* pData,
   size_t length,
   bool isNotify) {
-    // データを文字列として表示
-    String receivedData = "";
-    for (int i = 0; i < length; i++) {
-        receivedData += (char)pData[i];
-    }
+    // ポーリングベースに変更したため、この関数は使用しない
+}
 
-    // 受信データの形式: "デバイス番号:カウント値" (例: "1:5")
-    int colonIndex = receivedData.indexOf(':');
-    if (colonIndex > 0) {
-        int deviceNum = receivedData.substring(0, colonIndex).toInt();
-        int count = receivedData.substring(colonIndex + 1).toInt();
+// 特定のデバイスからデータを読み取る関数
+bool pollDeviceData(int deviceIndex) {
+    if (!devices[deviceIndex].connected || 
+        !devices[deviceIndex].pRemoteCharacteristic) {
+        return false;
+    }
+    
+    try {
+        // キャラクタリスティックからデータを読み取り
+        std::string value = devices[deviceIndex].pRemoteCharacteristic->readValue();
         
-        // デバイス番号が有効範囲かチェック
-        if (deviceNum >= 1 && deviceNum <= 4) {
-            int deviceIndex = deviceNum - 1; // 0-3のインデックスに変換
+        if (value.length() > 0) {
+            String receivedData = String(value.c_str());
             
-            // カウントの変化をチェック
-            if (count != deviceCounts[deviceIndex]) {
-                // カウント値を更新
-                deviceCounts[deviceIndex] = count;
+            // 受信データの形式: "デバイス番号:カウント値" (例: "1:5")
+            int colonIndex = receivedData.indexOf(':');
+            if (colonIndex > 0) {
+                int deviceNum = receivedData.substring(0, colonIndex).toInt();
+                int count = receivedData.substring(colonIndex + 1).toInt();
                 
-                // ゲート番号のみを出力（yonku_counterと同じ方式）
-                Serial.println(deviceNum);
-                Serial.flush();
-                
-                // LED点灯開始
-                digitalWrite(LED_PIN, HIGH);
-                ledOn = true;
-                ledStartTime = millis();
+                // デバイス番号が有効範囲かチェック
+                if (deviceNum >= 1 && deviceNum <= 4) {
+                    int targetDeviceIndex = deviceNum - 1; // 0-3のインデックスに変換
+                    
+                    // カウントの変化をチェック
+                    if (count != deviceCounts[targetDeviceIndex]) {
+                        // カウント値を更新
+                        deviceCounts[targetDeviceIndex] = count;
+                        
+                        // ゲート番号のみを出力（yonku_counterと同じ方式）
+                        Serial.println(deviceNum);
+                        Serial.flush();
+                        
+                        // LED点灯開始
+                        digitalWrite(LED_PIN, HIGH);
+                        ledOn = true;
+                        ledStartTime = millis();
+                        
+                        return true;
+                    }
+                }
             }
         }
+    } catch (const std::exception& e) {
+        // 読み取りエラーの場合は静かに無視
+        return false;
     }
+    
+    return false;
 }
 
 // BLEサーバーへの接続（single_testと同じ方式）
@@ -144,7 +169,7 @@ bool connectToDevice(int deviceIndex) {
     // Serial.println("✓ Characteristic found");
     // Serial.flush();
 
-    // 通知の登録
+    // 通知の登録（ポーリングベースなので不要だが、互換性のため残す）
     if(devices[deviceIndex].pRemoteCharacteristic->canNotify()) {
         devices[deviceIndex].pRemoteCharacteristic->registerForNotify(notifyCallback);
         // Serial.println("✓ Notifications enabled");
@@ -288,6 +313,17 @@ void loop() {
     ledOn = false;
   }
   
+  // 50ms間隔で順次ポーリング
+  if (millis() - lastPollingTime >= POLLING_INTERVAL) {
+    lastPollingTime = millis();
+    
+    // 現在のデバイスをポーリング
+    pollDeviceData(currentPollingDevice);
+    
+    // 次のデバイスに移動（0-3を循環）
+    currentPollingDevice = (currentPollingDevice + 1) % 4;
+  }
+  
   // 各デバイスの接続が必要な場合
   for (int i = 0; i < 4; i++) {
     if (devices[i].doConnect) {
@@ -333,5 +369,5 @@ void loop() {
     BLEDevice::getScan()->start(10, false);  // 10秒間スキャン
   }
   
-  delay(100);
+  delay(10);  // 短い遅延でCPU使用率を下げる（100ms -> 10ms）
 }
