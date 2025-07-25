@@ -404,6 +404,20 @@ void loop() {
           
           // カウントアップ可能メッセージフラグをリセット（次回カウントアップ用）
           canCountUpMessageShown = false;
+
+          // --- ここでゲート番号に応じた文字列をBLE送信 ---
+          if (deviceConnected && pCharacteristic) {
+            char gateChar = 'a'; // デフォルト: 1
+            if (currentDevice.deviceNumber == 1) gateChar = 'a';
+            else if (currentDevice.deviceNumber == 2) gateChar = 's';
+            else if (currentDevice.deviceNumber == 3) gateChar = 'd';
+            else if (currentDevice.deviceNumber == 4) gateChar = 'f';
+            String gateStr = String(gateChar);
+            pCharacteristic->setValue(gateStr.c_str());
+            pCharacteristic->notify();
+            Serial.print("BLE sent gate char: ");
+            Serial.println(gateStr);
+          }
         } else {
           // カウントアップできない場合のログ
           Serial.print("[Count waiting] Distance: ");
@@ -461,6 +475,7 @@ void loop() {
     
     // 常にBLEでカウントデータを送信（データ消失防止）
     static unsigned long lastBLESendTime = 0;
+    // ↓カウント送信を不要ならコメントアウト
     if (deviceConnected && pCharacteristic && millis() - lastBLESendTime > 25) { // 1/25ms(40Hz)間隔で今のカウントを送信
       String countData = String(currentDevice.deviceNumber) + ":" + String(deviceCount);
       pCharacteristic->setValue(countData.c_str());
