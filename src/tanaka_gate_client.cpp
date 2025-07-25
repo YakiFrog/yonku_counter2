@@ -29,6 +29,10 @@ struct ServerConnection {
 
 ServerConnection server;
 
+// データ管理用変数
+String lastReceivedData = "-";  // 最新の受信データ（初期値は「-」）
+String previousData = "";       // 前回の受信データ（重複チェック用）
+
 // LED制御用変数
 unsigned long ledStartTime = 0;
 bool ledOn = false;
@@ -47,6 +51,12 @@ class MyClientCallback : public BLEClientCallbacks {
     void onDisconnect(BLEClient* pclient) {
         Serial.println("*** Disconnected from Tanaka Gate Server ***");
         server.connected = false;
+        
+        // 切断時はデータを「-」にリセット
+        lastReceivedData = "-";
+        previousData = "";
+        Serial.println("Latest Data: -");
+        // Serial2.println("-");
     }
 };
 
@@ -75,24 +85,61 @@ bool pollServerData() {
         if (value.length() > 0) {
             String receivedData = String(value.c_str());
             
-            // 受信データを表示
-            Serial.print("Received: ");
-            Serial.println(receivedData);
-            Serial.flush();
-            
-            // UARTで受信データを送信
-            Serial2.println(receivedData);
-            Serial2.flush();
-            
-            // LED点灯開始
-            digitalWrite(LED_PIN, HIGH);
-            ledOn = true;
-            ledStartTime = millis();
-            
-            return true;
+            // データが変化した場合のみ処理（タイムスタンプにより常に変化）
+            if (receivedData != previousData) {
+                previousData = receivedData;
+                
+                // タイムスタンプ付きデータから実際のデータを抽出
+                // 形式: "timestamp:actualData"
+                int colonIndex = receivedData.indexOf(':');
+                String actualData;
+                if (colonIndex > 0) {
+                    actualData = receivedData.substring(colonIndex + 1);
+                } else {
+                    actualData = receivedData; // タイムスタンプがない場合はそのまま
+                }
+                
+                lastReceivedData = actualData;
+                
+                // 受信データを表示
+                Serial.print("Latest Data: ");
+                Serial.println(lastReceivedData);
+                Serial.flush();
+                
+                // UARTで実際のデータを送信
+                Serial2.println(lastReceivedData);
+                Serial2.flush();
+                
+                // LED点灯開始
+                digitalWrite(LED_PIN, HIGH);
+                ledOn = true;
+                ledStartTime = millis();
+                
+                return true;
+            }
+        } else {
+            // データがない場合は「-」に設定
+            if (lastReceivedData != "-") {
+                lastReceivedData = "-";
+                Serial.println("Latest Data: -");
+                Serial.flush();
+                
+                // UARTで「-」を送信
+                // Serial2.println("-");
+                // Serial2.flush();
+            }
         }
     } catch (const std::exception& e) {
-        // 読み取りエラーの場合は静かに無視
+        // 読み取りエラーの場合も「-」に設定
+        if (lastReceivedData != "-") {
+            lastReceivedData = "-";
+            Serial.println("Latest Data: -");
+            Serial.flush();
+            
+            // UARTで「-」を送信
+            // Serial2.println("-");
+            // Serial2.flush();
+        }
         return false;
     }
     
@@ -326,13 +373,17 @@ void loop() {
   
   if (millis() - lastStatusTime >= statusInterval) {
     lastStatusTime = millis();
+    Serial.println("--------------------");
     Serial.print("Server connection status: ");
     if (server.connected) {
       Serial.println("Connected");
       Serial.print("  Server: ");
       Serial.println(server.deviceName);
+      Serial.print("  Latest Data: ");
+      Serial.println(lastReceivedData);
     } else {
       Serial.println("Disconnected");
+      Serial.println("  Latest Data: -");
     }
     Serial.println("--------------------");
   }

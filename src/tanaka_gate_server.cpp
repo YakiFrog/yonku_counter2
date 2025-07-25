@@ -23,6 +23,10 @@ BLECharacteristic* pTxCharacteristic = nullptr;
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
+// データ管理用変数
+String currentData = "";        // 現在のデータ
+unsigned long dataTimestamp = 0; // データのタイムスタンプ
+
 // LED制御用変数
 unsigned long ledStartTime = 0;
 bool ledOn = false;
@@ -157,14 +161,18 @@ void loop() {
             Serial.println(receivedData);
             Serial.flush();
             
+            // タイムスタンプ付きでデータを更新
+            currentData = String(millis()) + ":" + receivedData;
+            dataTimestamp = millis();
+            
             // BLEクライアントに送信
             if (deviceConnected && pTxCharacteristic) {
-                // 受信したデータをそのままBLE経由で送信
-                pTxCharacteristic->setValue(receivedData.c_str());
+                // タイムスタンプ付きデータをBLE経由で送信（一意性を保証）
+                pTxCharacteristic->setValue(currentData.c_str());
                 pTxCharacteristic->notify();
                 
                 Serial.print("Sent to client: ");
-                Serial.println(receivedData);
+                Serial.println(currentData);
                 Serial.flush();
                 
                 // データ送信時にLED点灯
