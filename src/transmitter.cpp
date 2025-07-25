@@ -11,6 +11,14 @@
 // LED設定
 #define LED_PIN 21  // 内蔵LED
 
+// UART設定
+#define UART_RX_PIN 44  // UART受信ピン
+#define UART_TX_PIN 43  // UART送信ピン
+#define UART_BAUD_RATE 115200
+
+// ゲートに対応するUART送信文字
+const char gateChars[4] = {'a', 's', 'd', 'f'}; // ゲート1,2,3,4に対応
+
 // 4台のデバイス接続管理（単純化）
 struct DeviceConnection {
   BLEClient* pClient;
@@ -105,6 +113,10 @@ bool pollDeviceData(int deviceIndex) {
                         // ゲート番号のみを出力（yonku_counterと同じ方式）
                         Serial.println(deviceNum);
                         Serial.flush();
+                        
+                        // UARTで対応する文字を送信
+                        Serial2.println(gateChars[targetDeviceIndex]);
+                        Serial2.flush();
                         
                         // LED点灯開始
                         digitalWrite(LED_PIN, HIGH);
@@ -239,6 +251,9 @@ void setup() {
   delay(2000); // 安定化のための待機時間を延長
   // Serial.println("Yonku Counter Transmitter Starting...");
   // Serial.flush();
+  
+  // UART初期化
+  Serial2.begin(UART_BAUD_RATE, SERIAL_8N1, UART_RX_PIN, UART_TX_PIN);
   
   // LED初期化
   pinMode(LED_PIN, OUTPUT);
