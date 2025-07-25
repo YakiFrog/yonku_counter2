@@ -118,22 +118,6 @@ void identifyDevice() {
     if (devices[i].macAddress == wifiMacAddress) {
       currentDevice = devices[i];
       deviceIdentified = true;
-      Serial.print("Device identification completed: ");
-      Serial.print(currentDevice.deviceName);
-      Serial.print(" (number: ");
-      Serial.print(currentDevice.deviceNumber);
-      Serial.println(")");
-      
-      // デバイス固有のオフセット値を表示
-      Serial.print("Offset value: ");
-      Serial.print(currentDevice.offsetCalibration);
-      Serial.println("mm");
-      return;
-    }
-  }
-  
-  // 未登録デバイスの場合のデフォルト値を使用
-  Serial.println("WARNING: Unregistered device. Using default settings.");
   currentDevice = {"unknown", 0, "Unknown Device", 0};
   deviceIdentified = false;
 }
@@ -154,52 +138,33 @@ void initBLE() {
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_DEFAULT, ESP_PWR_LVL_P9); // 出力を最大値（+9dBm）に設定
   esp_ble_tx_power_set(ESP_BLE_PWR_TYPE_ADV, ESP_PWR_LVL_P9);     // アドバタイジング出力を最大に設定
   
-  // transmitter用サービス・キャラクタリスティック
-  pServerTransmitter = BLEDevice::createServer();
-  pServerTransmitter->setCallbacks(new MyServerCallbacksTransmitter());
-  BLEService *pServiceTransmitter = pServerTransmitter->createService(SERVICE_UUID);
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new MyServerCallbacks());
 
-  pCharacteristicTransmitter = pServiceTransmitter->createCharacteristic(
-                      CHARACTERISTIC_UUID,
-                      BLECharacteristic::PROPERTY_READ |
-                      BLECharacteristic::PROPERTY_WRITE |
-                      BLECharacteristic::PROPERTY_NOTIFY
-                    );
+  BLEService *pService = pServer->createService(SERVICE_UUID_TANAKA_GATE);
 
-  pCharacteristicTransmitter->addDescriptor(new BLE2902());
-  pServiceTransmitter->start();
-  BLEAdvertising *pAdvertisingTransmitter = BLEDevice::getAdvertising();
-  pAdvertisingTransmitter->addServiceUUID(SERVICE_UUID);
-
-  // tanaka_gate用サービス・キャラクタリスティック
-  pServerTanakaGate = BLEDevice::createServer();
-  pServerTanakaGate->setCallbacks(new MyServerCallbacksTanakaGate());
-  BLEService *pServiceTanakaGate = pServerTanakaGate->createService(SERVICE_UUID_TANAKA_GATE);
-
-  pCharacteristicTanakaGate = pServiceTanakaGate->createCharacteristic(
+  pCharacteristic = pService->createCharacteristic(
                       CHARACTERISTIC_UUID_TANAKA_GATE,
                       BLECharacteristic::PROPERTY_READ |
                       BLECharacteristic::PROPERTY_WRITE |
                       BLECharacteristic::PROPERTY_NOTIFY
                     );
 
-  pCharacteristicTanakaGate->addDescriptor(new BLE2902());
-  pServiceTanakaGate->start();
-  BLEAdvertising *pAdvertisingTanakaGate = BLEDevice::getAdvertising();
-  pAdvertisingTanakaGate->addServiceUUID(SERVICE_UUID_TANAKA_GATE);
+  pCharacteristic->addDescriptor(new BLE2902());
 
-  // アドバタイジング開始
+  pService->start();
+  
+  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
+  pAdvertising->addServiceUUID(SERVICE_UUID_TANAKA_GATE);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->setMinPreferred(0x0);  // iOS接続性向上
   BLEDevice::startAdvertising();
   
   Serial.println("BLE initialization complete - " + deviceName);
   Serial.println("Advertising started - waiting for connection...");
-  Serial.print("Service UUID (transmitter): ");
-  Serial.println(SERVICE_UUID);
-  Serial.print("Characteristic UUID (transmitter): ");
-  Serial.println(CHARACTERISTIC_UUID);
-  Serial.print("Service UUID (tanaka_gate): ");
+  Serial.print("Service UUID: ");
   Serial.println(SERVICE_UUID_TANAKA_GATE);
-  Serial.print("Characteristic UUID (tanaka_gate): ");
+  Serial.print("Characteristic UUID: ");
   Serial.println(CHARACTERISTIC_UUID_TANAKA_GATE);
 }
 
@@ -363,25 +328,15 @@ void setup() {
 }
 
 void loop() {
-  // BLE接続状態管理（transmitter）
-  if (!deviceConnectedTransmitter && oldDeviceConnectedTransmitter) {
-    delay(500);
-    pServerTransmitter->startAdvertising();
-    Serial.println("Advertising restarted (transmitter)");
-    oldDeviceConnectedTransmitter = deviceConnectedTransmitter;
+  // BLE接続状態管理
+  if (!deviceConnected && oldDeviceConnected) {
+    delay(500); // BLEスタックに準備時間を与える
+    pServer->startAdvertising(); // アドバタイジング再開
+    Serial.println("Advertising restarted");
+    oldDeviceConnected = deviceConnected;
   }
-  if (deviceConnectedTransmitter && !oldDeviceConnectedTransmitter) {
-    oldDeviceConnectedTransmitter = deviceConnectedTransmitter;
-  }
-  // BLE接続状態管理（tanaka_gate）
-  if (!deviceConnectedTanakaGate && oldDeviceConnectedTanakaGate) {
-    delay(500);
-    pServerTanakaGate->startAdvertising();
-    Serial.println("Advertising restarted (tanaka_gate)");
-    oldDeviceConnectedTanakaGate = deviceConnectedTanakaGate;
-  }
-  if (deviceConnectedTanakaGate && !oldDeviceConnectedTanakaGate) {
-    oldDeviceConnectedTanakaGate = deviceConnectedTanakaGate;
+  if (deviceConnected && !oldDeviceConnected) {
+    oldDeviceConnected = deviceConnected;
   }
 
   // 校正コマンドをチェック
@@ -453,17 +408,17 @@ void loop() {
           // カウントアップ可能メッセージフラグをリセット（次回カウントアップ用）
           canCountUpMessageShown = false;
 
-          // tanaka_gateへゲート番号送信
-          if (deviceConnectedTanakaGate && pCharacteristicTanakaGate) {
-            char gateChar = 'a';
-            if (currentDevice.deviceNumber == 4) gateChar = 'a';
-            else if (currentDevice.deviceNumber == 3) gateChar = 's';
-            else if (currentDevice.deviceNumber == 2) gateChar = 'd';
-            else if (currentDevice.deviceNumber == 1) gateChar = 'f';
+          // --- ここでゲート番号に応じた文字列をBLE送信 ---
+          if (deviceConnected && pCharacteristic) {
+            char gateChar = 'a'; // デフォルト: 1
+            if (currentDevice.deviceNumber == 1) gateChar = 'a';
+            else if (currentDevice.deviceNumber == 2) gateChar = 's';
+            else if (currentDevice.deviceNumber == 3) gateChar = 'd';
+            else if (currentDevice.deviceNumber == 4) gateChar = 'f';
             String gateStr = String(gateChar);
-            pCharacteristicTanakaGate->setValue(gateStr.c_str());
-            pCharacteristicTanakaGate->notify();
-            Serial.print("BLE sent gate char (tanaka_gate): ");
+            pCharacteristic->setValue(gateStr.c_str());
+            pCharacteristic->notify();
+            Serial.print("BLE sent gate char: ");
             Serial.println(gateStr);
           }
         } else {
@@ -504,10 +459,11 @@ void loop() {
       unsigned long currentTime = millis();
       unsigned long elapsedTime = currentTime - countUpLEDStartTime;
       
-      if (elapsedTime < COUNT_UP_LED_DURATION) { // 3秒間点滅
+      if (elapsedTime < COUNT_UP_LED_DURATION) { // もし，elapsedTimeが3秒未満なら
+        // 3秒間点滅（250ms間隔）
         static unsigned long lastBlinkTime = 0;
         static bool blinkState = false;
-
+        
         if (currentTime - lastBlinkTime > 250) {
           blinkState = !blinkState;
           setLEDIntensity(0, blinkState ? 255 : 0); // 青色点滅
@@ -520,15 +476,31 @@ void loop() {
       }
     }
     
-    // transmitterへ常時カウントデータ送信（40Hz）
-    static unsigned long lastBLESendTimeTransmitter = 0;
-    if (deviceConnectedTransmitter && pCharacteristicTransmitter && millis() - lastBLESendTimeTransmitter > 25) {
+    // 常にBLEでカウントデータを送信（データ消失防止）
+    static unsigned long lastBLESendTime = 0;
+    // ↓カウント送信を不要ならコメントアウト
+    if (deviceConnected && pCharacteristic && millis() - lastBLESendTime > 25) { // 1/25ms(40Hz)間隔で今のカウントを送信
       String countData = String(currentDevice.deviceNumber) + ":" + String(deviceCount);
-      pCharacteristicTransmitter->setValue(countData.c_str());
-      pCharacteristicTransmitter->notify();
-      lastBLESendTimeTransmitter = millis();
+      pCharacteristic->setValue(countData.c_str());
+      pCharacteristic->notify();
+
+      // 通信中の青色点滅（カウントアップ中でない場合のみ）
+      if (!countUpLEDActive) {
+        static unsigned long commLEDStartTime = 0;
+        static bool commLEDActive = false;
+        
+        if (!commLEDActive) {
+          setLEDIntensity(0, 255); // 青色点滅
+          commLEDStartTime = millis();
+          commLEDActive = true;
+        } else if (millis() - commLEDStartTime > 50) { // 50ms間点滅
+          setLEDIntensity(0, 100); // 通常の青色点滅に戻す
+          commLEDActive = false;
+        }
+      }
+      
+      lastBLESendTime = millis();
     }
-    // tanaka_gateへ常時送信は不要（カウントアップ時のみ）
   } else {
     // センサーレスモード：青色点灯で待機状態を表示
     static unsigned long lastPatternTime = 0;

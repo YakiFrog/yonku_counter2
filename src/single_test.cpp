@@ -5,8 +5,10 @@
 #include <BLEAdvertisedDevice.h>
 
 // BLEの設定
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define SERVICE_UUID_TRANSMITTER        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID_TRANSMITTER "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define SERVICE_UUID_TANAKA_GATE        "e1e2e3e4-1111-2222-3333-444455556666"
+#define CHARACTERISTIC_UUID_TANAKA_GATE "e1e2e3e4-aaaa-bbbb-cccc-ddddeeeeffff"
 
 // LED設定
 #define LED_PIN 21
@@ -17,6 +19,19 @@ BLERemoteCharacteristic* pRemoteCharacteristic = nullptr;
 bool deviceConnected = false;
 bool doConnect = false;
 BLEAddress* pServerAddress = nullptr;
+
+// 2台分のBLEクライアント・キャラクタリスティック・アドレス・接続状態
+BLEClient* pClientTransmitter = nullptr;
+BLERemoteCharacteristic* pRemoteCharacteristicTransmitter = nullptr;
+BLEAddress* pServerAddressTransmitter = nullptr;
+bool deviceConnectedTransmitter = false;
+bool doConnectTransmitter = false;
+
+BLEClient* pClientTanakaGate = nullptr;
+BLERemoteCharacteristic* pRemoteCharacteristicTanakaGate = nullptr;
+BLEAddress* pServerAddressTanakaGate = nullptr;
+bool deviceConnectedTanakaGate = false;
+bool doConnectTanakaGate = false;
 
 // BLEクライアント接続状態管理用コールバッククラス
 class MyClientCallback : public BLEClientCallbacks {
@@ -52,63 +67,119 @@ static void notifyCallback(
     digitalWrite(LED_PIN, LOW);
 }
 
-// BLEサーバーへの接続（元のコードに基づく単純版）
-bool connectToServer() {
-    Serial.print("接続先: ");
-    Serial.println(pServerAddress->toString().c_str());
+// BLEサーバーへの接続（transmitter用）
+bool connectToTransmitter() {
+    Serial.print("接続先 (Transmitter): ");
+    Serial.println(pServerAddressTransmitter->toString().c_str());
     Serial.flush();
     
-    pClient = BLEDevice::createClient();
-    pClient->setClientCallbacks(new MyClientCallback());
+    pClientTransmitter = BLEDevice::createClient();
+    pClientTransmitter->setClientCallbacks(new MyClientCallback());
     
     // サーバーに接続
-    if (!pClient->connect(*pServerAddress)) {
-        Serial.println("ERROR: Failed to connect to server");
+    if (!pClientTransmitter->connect(*pServerAddressTransmitter)) {
+        Serial.println("ERROR: Failed to connect to transmitter server");
         Serial.flush();
         return false;
     }
-    Serial.println("✓ Connected to server");
+    Serial.println("✓ Connected to transmitter server");
     Serial.flush();
 
     // サービスの取得
-    BLERemoteService* pRemoteService = pClient->getService(BLEUUID(SERVICE_UUID));
+    BLERemoteService* pRemoteService = pClientTransmitter->getService(BLEUUID(SERVICE_UUID_TRANSMITTER));
     if (pRemoteService == nullptr) {
-        Serial.println("ERROR: Service not found");
+        Serial.println("ERROR: Transmitter service not found");
         Serial.flush();
-        pClient->disconnect();
+        pClientTransmitter->disconnect();
         return false;
     }
-    Serial.println("✓ Service found");
+    Serial.println("✓ Transmitter service found");
     Serial.flush();
 
     // キャラクタリスティックの取得
-    pRemoteCharacteristic = pRemoteService->getCharacteristic(BLEUUID(CHARACTERISTIC_UUID));
-    if (pRemoteCharacteristic == nullptr) {
-        Serial.println("ERROR: Characteristic not found");
+    pRemoteCharacteristicTransmitter = pRemoteService->getCharacteristic(BLEUUID(CHARACTERISTIC_UUID_TRANSMITTER));
+    if (pRemoteCharacteristicTransmitter == nullptr) {
+        Serial.println("ERROR: Transmitter characteristic not found");
         Serial.flush();
-        pClient->disconnect();
+        pClientTransmitter->disconnect();
         return false;
     }
-    Serial.println("✓ Characteristic found");
+    Serial.println("✓ Transmitter characteristic found");
     Serial.flush();
 
     // 通知の登録
-    if(pRemoteCharacteristic->canNotify()) {
-        pRemoteCharacteristic->registerForNotify(notifyCallback);
-        Serial.println("✓ Notifications enabled");
+    if(pRemoteCharacteristicTransmitter->canNotify()) {
+        pRemoteCharacteristicTransmitter->registerForNotify(notifyCallback);
+        Serial.println("✓ Transmitter notifications enabled");
         Serial.flush();
     } else {
-        Serial.println("WARNING: Device does not support notifications");
+        Serial.println("WARNING: Transmitter device does not support notifications");
         Serial.flush();
     }
     
-    deviceConnected = true;
-    Serial.println("=== CONNECTION SUCCESSFUL ===");
+    deviceConnectedTransmitter = true;
+    Serial.println("=== TRANSMITTER CONNECTION SUCCESSFUL ===");
     Serial.flush();
     return true;
 }
 
-// BLEスキャンコールバッククラス（元のコードに基づく）
+// BLEサーバーへの接続（tanaka_gate用）
+bool connectToTanakaGate() {
+    Serial.print("接続先 (Tanaka Gate): ");
+    Serial.println(pServerAddressTanakaGate->toString().c_str());
+    Serial.flush();
+    
+    pClientTanakaGate = BLEDevice::createClient();
+    pClientTanakaGate->setClientCallbacks(new MyClientCallback());
+    
+    // サーバーに接続
+    if (!pClientTanakaGate->connect(*pServerAddressTanakaGate)) {
+        Serial.println("ERROR: Failed to connect to Tanaka Gate server");
+        Serial.flush();
+        return false;
+    }
+    Serial.println("✓ Connected to Tanaka Gate server");
+    Serial.flush();
+
+    // サービスの取得
+    BLERemoteService* pRemoteService = pClientTanakaGate->getService(BLEUUID(SERVICE_UUID_TANAKA_GATE));
+    if (pRemoteService == nullptr) {
+        Serial.println("ERROR: Tanaka Gate service not found");
+        Serial.flush();
+        pClientTanakaGate->disconnect();
+        return false;
+    }
+    Serial.println("✓ Tanaka Gate service found");
+    Serial.flush();
+
+    // キャラクタリスティックの取得
+    pRemoteCharacteristicTanakaGate = pRemoteService->getCharacteristic(BLEUUID(CHARACTERISTIC_UUID_TANAKA_GATE));
+    if (pRemoteCharacteristicTanakaGate == nullptr) {
+        Serial.println("ERROR: Tanaka Gate characteristic not found");
+        Serial.flush();
+        pClientTanakaGate->disconnect();
+        return false;
+    }
+    Serial.println("✓ Tanaka Gate characteristic found");
+    Serial.flush();
+
+    // 通知の登録
+    if(pRemoteCharacteristicTanakaGate->canNotify()) {
+        pRemoteCharacteristicTanakaGate->registerForNotify(notifyCallback);
+        Serial.println("✓ Tanaka Gate notifications enabled");
+        Serial.flush();
+    } else {
+        Serial.println("WARNING: Tanaka Gate device does not support notifications");
+        Serial.flush();
+    }
+    
+    deviceConnectedTanakaGate = true;
+    Serial.println("=== TANAKA GATE CONNECTION SUCCESSFUL ===");
+    Serial.flush();
+    return true;
+}
+
+// BLEスキャンコールバッククラス（2台対応）
 class SingleDeviceCallback: public BLEAdvertisedDeviceCallbacks {
     void onResult(BLEAdvertisedDevice advertisedDevice) {
         // デバイス名の取得（空の場合の処理）
@@ -123,16 +194,28 @@ class SingleDeviceCallback: public BLEAdvertisedDeviceCallbacks {
                      advertisedDevice.getRSSI());
         Serial.flush();
         
-        // YonkuCounterデバイスを見つけたら接続準備
-        if (advertisedDevice.haveName() && 
-            deviceName.startsWith("YonkuCounter_")) {
-            
-            Serial.println(">>> Target YonkuCounter device found! <<<");
-            Serial.flush();
-            
-            BLEDevice::getScan()->stop();
-            pServerAddress = new BLEAddress(advertisedDevice.getAddress());
-            doConnect = true;
+        // transmitterデバイスを見つけたら接続準備
+        if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(BLEUUID(SERVICE_UUID_TRANSMITTER))) {
+            if (!deviceConnectedTransmitter && !doConnectTransmitter) {
+                Serial.println(">>> Target Transmitter device found! <<<");
+                Serial.flush();
+                
+                BLEDevice::getScan()->stop();
+                pServerAddressTransmitter = new BLEAddress(advertisedDevice.getAddress());
+                doConnectTransmitter = true;
+            }
+        }
+        
+        // tanaka_gateデバイスを見つけたら接続準備
+        if (advertisedDevice.haveServiceUUID() && advertisedDevice.isAdvertisingService(BLEUUID(SERVICE_UUID_TANAKA_GATE))) {
+            if (!deviceConnectedTanakaGate && !doConnectTanakaGate) {
+                Serial.println(">>> Target Tanaka Gate device found! <<<");
+                Serial.flush();
+                
+                BLEDevice::getScan()->stop();
+                pServerAddressTanakaGate = new BLEAddress(advertisedDevice.getAddress());
+                doConnectTanakaGate = true;
+            }
         }
     }
 };
@@ -177,29 +260,58 @@ void setup() {
 }
 
 void loop() {
-    // 接続が必要な場合
-    if (doConnect) {
-        if (connectToServer()) {
-            Serial.println("*** Connection successful! ***");
+    // transmitter接続
+    if (doConnectTransmitter) {
+        if (connectToTransmitter()) {
+            Serial.println("*** Transmitter connection successful! ***");
             Serial.flush();
         } else {
-            Serial.println("*** Connection failed! ***");
+            Serial.println("*** Transmitter connection failed! ***");
             Serial.flush();
-            deviceConnected = false;
+            deviceConnectedTransmitter = false;
         }
-        doConnect = false;
+        doConnectTransmitter = false;
     }
 
-    // 接続状態監視
-    if (deviceConnected && pClient && !pClient->isConnected()) {
-        Serial.println("Connection lost! Restarting scan...");
-        Serial.flush();
-        deviceConnected = false;
-        if (pClient) {
-            delete pClient;
-            pClient = nullptr;
+    // tanaka_gate接続
+    if (doConnectTanakaGate) {
+        if (connectToTanakaGate()) {
+            Serial.println("*** Tanaka Gate connection successful! ***");
+            Serial.flush();
+        } else {
+            Serial.println("*** Tanaka Gate connection failed! ***");
+            Serial.flush();
+            deviceConnectedTanakaGate = false;
         }
-        pRemoteCharacteristic = nullptr;
+        doConnectTanakaGate = false;
+    }
+
+    // transmitter切断検知
+    if (deviceConnectedTransmitter && pClientTransmitter && !pClientTransmitter->isConnected()) {
+        Serial.println("Transmitter connection lost! Restarting scan...");
+        Serial.flush();
+        deviceConnectedTransmitter = false;
+        if (pClientTransmitter) {
+            delete pClientTransmitter;
+            pClientTransmitter = nullptr;
+        }
+        pRemoteCharacteristicTransmitter = nullptr;
+        
+        delay(2000);
+        Serial.println("Starting scan again...");
+        Serial.flush();
+        BLEDevice::getScan()->start(5, false); // 5秒間スキャン
+    }
+    // tanaka_gate切断検知
+    if (deviceConnectedTanakaGate && pClientTanakaGate && !pClientTanakaGate->isConnected()) {
+        Serial.println("Tanaka Gate connection lost! Restarting scan...");
+        Serial.flush();
+        deviceConnectedTanakaGate = false;
+        if (pClientTanakaGate) {
+            delete pClientTanakaGate;
+            pClientTanakaGate = nullptr;
+        }
+        pRemoteCharacteristicTanakaGate = nullptr;
         
         delay(2000);
         Serial.println("Starting scan again...");
@@ -211,7 +323,7 @@ void loop() {
     static unsigned long lastScanTime = 0;
     const long scanInterval = 5000;  // スキャン間隔（5秒）
     
-    if (!deviceConnected && !doConnect && (millis() - lastScanTime >= scanInterval)) {
+    if ((!deviceConnectedTransmitter || !deviceConnectedTanakaGate) && !doConnectTransmitter && !doConnectTanakaGate && (millis() - lastScanTime >= scanInterval)) {
         lastScanTime = millis();
         Serial.println("Scanning for devices...");
         Serial.flush();

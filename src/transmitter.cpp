@@ -5,8 +5,8 @@
 #include <BLEAdvertisedDevice.h>
 
 // BLEの設定
-#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+#define SERVICE_UUID        "e1e2e3e4-1111-2222-3333-444455556666" // 新しいtanaka_gate用サービスUUID
+#define CHARACTERISTIC_UUID "e1e2e3e4-aaaa-bbbb-cccc-ddddeeeeffff" // 新しいtanaka_gate用キャラクタリスティックUUID
 
 // LED設定
 #define LED_PIN 21  // 内蔵LED
