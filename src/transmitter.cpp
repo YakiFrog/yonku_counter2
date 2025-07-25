@@ -114,7 +114,7 @@ bool pollDeviceData(int deviceIndex) {
                         Serial.println(deviceNum);
                         Serial.flush();
                         
-                        // UARTで対応する文字を送信
+                        // UARTで対応する文字を送信（改行付き）
                         Serial2.println(gateChars[targetDeviceIndex]);
                         Serial2.flush();
                         
@@ -326,6 +326,32 @@ void loop() {
   if (ledOn && (millis() - ledStartTime) > LED_DURATION) {
     digitalWrite(LED_PIN, LOW);
     ledOn = false;
+  }
+  
+  // シリアル通信からの入力を確認
+  if (Serial.available() > 0) {
+    // 1文字読み取り
+    char inputChar = Serial.read();
+    
+    // 有効な文字の場合のみUART経由で送信
+    if (isalpha(inputChar) || isdigit(inputChar)) {
+      // UART経由でtanaka_gate_serverに送信（改行付き）
+      Serial2.println(inputChar);
+      Serial2.flush();
+      
+      Serial.printf("Manual sent: %c\n", inputChar);
+      Serial.flush();
+      
+      // LED点灯
+      digitalWrite(LED_PIN, HIGH);
+      ledOn = true;
+      ledStartTime = millis();
+    }
+    
+    // バッファをクリア
+    while(Serial.available()) {
+      Serial.read();
+    }
   }
   
   // 50ms間隔で順次ポーリング
