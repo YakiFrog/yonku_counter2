@@ -37,7 +37,7 @@ const int LED_DURATION = 100;  // LED点灯時間（ms）
 // 順次ポーリング用変数
 int currentPollingDevice = 0;  // 現在ポーリング中のデバイス（0-3）
 unsigned long lastPollingTime = 0;
-const unsigned long POLLING_INTERVAL = 10;  // 10ms間隔でポーリング（さらに高速化）
+const unsigned long POLLING_INTERVAL = 50;  // 50ms間隔でポーリング
 
 // 接続済みデバイスリスト管理用
 int connectedDeviceList[4];  // 接続済みデバイスのインデックス
@@ -49,6 +49,7 @@ const long scanInterval = 15000;  // スキャン間隔（15秒に延長）
 bool scanInProgress = false;
 unsigned long scanStartTime = 0;  // スキャン開始時刻
 const unsigned long scanDuration = 5000;  // スキャン時間（5秒）
+BLEScan* pBLEScan = nullptr;  // グローバルスキャンポインタ
 
 // 単一のコールバックインスタンス
 class MyClientCallback : public BLEClientCallbacks {
@@ -234,6 +235,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
           // Serial.println(" found! <<<");
           // Serial.flush();
           
+          // スキャンを安全に停止
           BLEDevice::getScan()->stop();
           devices[deviceIndex].pServerAddress = new BLEAddress(advertisedDevice.getAddress());
           devices[deviceIndex].deviceName = deviceName;
@@ -338,7 +340,7 @@ void loop() {
   // 接続済みデバイスリストを更新
   updateConnectedDeviceList();
   
-  // 接続済みデバイスのみを10ms間隔で順次ポーリング（最優先処理）
+  // 接続済みデバイスのみを50ms間隔で順次ポーリング
   if (connectedDeviceCount > 0 && millis() - lastPollingTime >= POLLING_INTERVAL) {
     lastPollingTime = millis();
     
@@ -350,7 +352,7 @@ void loop() {
     currentPollingDevice = (currentPollingDevice + 1) % connectedDeviceCount;
   }
   
-  // 各デバイスの接続が必要な場合（非同期処理）
+  // 各デバイスの接続が必要な場合
   for (int i = 0; i < 4; i++) {
     if (devices[i].doConnect) {
       if (connectToDevice(i)) {
@@ -362,7 +364,7 @@ void loop() {
     }
   }
 
-  // 接続状態監視（軽量化）
+  // 接続状態監視
   for (int i = 0; i < 4; i++) {
     if (devices[i].connected && devices[i].pClient && !devices[i].pClient->isConnected()) {
       devices[i].connected = false;
@@ -372,17 +374,16 @@ void loop() {
       }
       devices[i].pRemoteCharacteristic = nullptr;
       connectedDevices--;
-      // 即座に再スキャンを開始
-      if (!scanInProgress) {
-        BLEDevice::getScan()->start(scanDuration / 1000, false); // 5秒間スキャン
-        scanInProgress = true;
-        scanStartTime = millis();
-        lastScanTime = millis();
-      }
+      
+      delay(1000);
+      BLEDevice::getScan()->start(5, false); // 5秒間スキャン
     }
   }
 
-  // 未接続状態での再スキャン制御（頻度を下げる）
+  // 未接続状態での再スキャン制御
+  static unsigned long lastScanTime = 0;
+  const long scanInterval = 8000;  // スキャン間隔（8秒）
+  
   bool needRescan = false;
   for (int i = 0; i < 4; i++) {
     if (!devices[i].connected && !devices[i].doConnect) {
@@ -391,20 +392,10 @@ void loop() {
     }
   }
   
-  // スキャン完了チェック（タイマーベース）
-  if (scanInProgress && (millis() - scanStartTime >= scanDuration)) {
-    scanInProgress = false;
-    BLEDevice::getScan()->stop();
-  }
-  
-  // 必要時のみ再スキャン（頻度を大幅に下げる）
-  if (needRescan && !scanInProgress && (millis() - lastScanTime >= scanInterval)) {
+  if (needRescan && (millis() - lastScanTime >= scanInterval)) {
     lastScanTime = millis();
-    scanStartTime = millis();
-    BLEDevice::getScan()->start(scanDuration / 1000, false);  // 5秒間スキャン
-    scanInProgress = true;
+    BLEDevice::getScan()->start(5, false);  // 5秒間スキャン
   }
   
-  // CPUを他の処理に譲る最小限の処理のみ
-  yield();
+  delay(10);  // 短い遅延でCPU使用率を下げる
 }
