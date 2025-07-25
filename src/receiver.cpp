@@ -52,7 +52,7 @@ bool baselineCalibrated = false;
 int deviceCount = 0;             // このデバイスのカウント数
 unsigned long lastCountTime = 0; // 最後にカウントした時刻
 const unsigned long COUNT_IGNORE_DURATION = 3000; // 3秒間の重複カウント防止
-const int DETECTION_THRESHOLD = 16; // 検出閾値（ベースライン距離からの差mm）
+const int DETECTION_THRESHOLD = 10; // 検出閾値（ベースライン距離からの差mm）
 
 // LED制御関連変数
 bool countUpLEDActive = false;   // カウントアップ点滅制御
