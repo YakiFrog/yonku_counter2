@@ -29,7 +29,8 @@ DeviceCalibration devices[] = {
   {"cc:ba:97:15:4d:0c", 1, "Device1", 125},
   {"cc:ba:97:15:53:20", 2, "Device2", 55},  // WiFi MACアドレス
   {"cc:ba:97:15:4f:28", 3, "Device3", -5},
-  {"cc:ba:97:15:37:34", 4, "Device4", 0} 
+  {"cc:ba:97:15:37:34", 4, "Device4", 0}, // 4 old
+  {"98:3d:ae:ee:85:9c", 4, "Device4", 125} // 4 new
 };
 
 // BLE関連変数
@@ -95,7 +96,7 @@ void identifyDevice() {
   Serial.println(btMacStr);
   
   // デバイス配列から一致するデバイスを検索（WiFi MACで識別）
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 5; i++) {
     if (devices[i].macAddress == wifiMacAddress) {
       currentDevice = devices[i];
       deviceIdentified = true;
