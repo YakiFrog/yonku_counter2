@@ -37,7 +37,7 @@ const int LED_DURATION = 100;  // LED点灯時間（ms）
 // 順次ポーリング用変数
 int currentPollingDevice = 0;  // 現在ポーリング中のデバイス（0-3）
 unsigned long lastPollingTime = 0;
-const unsigned long POLLING_INTERVAL = 25;  // 25ms間隔でポーリング
+const unsigned long POLLING_INTERVAL = 50;  // 50ms間隔でポーリング
 
 // 接続済みデバイスリスト管理用
 int connectedDeviceList[4];  // 接続済みデバイスのインデックス
