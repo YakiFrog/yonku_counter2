@@ -63,6 +63,15 @@ class MyClientCallback : public BLEClientCallbacks {
                 // Serial.print("Device ");
                 // Serial.print(i + 1);
                 // Serial.println(" disconnection handled");
+                
+                // 接続状態を直ちにPCへ通知
+                Serial.print("STATUS:");
+                for(int j=0; j<4; j++) {
+                    Serial.print(devices[j].connected ? "1" : "0");
+                    if(j < 3) Serial.print(",");
+                }
+                Serial.println();
+                Serial.flush();
                 break;
             }
         }
@@ -200,6 +209,15 @@ bool connectToDevice(int deviceIndex) {
     // Serial.print(connectedDevices);
     // Serial.println("/4 ***");
     // Serial.flush();
+    
+    // 接続状態を直ちにPCへ通知
+    Serial.print("STATUS:");
+    for(int i=0; i<4; i++) {
+        Serial.print(devices[i].connected ? "1" : "0");
+        if(i < 3) Serial.print(",");
+    }
+    Serial.println();
+    Serial.flush();
     
     return true;
 }
@@ -354,6 +372,21 @@ void loop() {
     }
   }
   
+  // 1秒に1回、PCに接続状態を送信
+  static unsigned long lastStatusTime = 0;
+  if (millis() - lastStatusTime >= 1000) {
+    lastStatusTime = millis();
+    Serial.print("STATUS:");
+    Serial.print(devices[0].connected ? "1" : "0");
+    Serial.print(",");
+    Serial.print(devices[1].connected ? "1" : "0");
+    Serial.print(",");
+    Serial.print(devices[2].connected ? "1" : "0");
+    Serial.print(",");
+    Serial.println(devices[3].connected ? "1" : "0");
+    Serial.flush();
+  }
+
   // 50ms間隔で順次ポーリング
   if (millis() - lastPollingTime >= POLLING_INTERVAL) {
     lastPollingTime = millis();
