@@ -421,14 +421,15 @@ void loop() {
       devices[i].pRemoteCharacteristic = nullptr;
       connectedDevices--;
       
-      delay(1000);
-      BLEDevice::getScan()->start(10, false); // 10秒間スキャン
+      delay(500);
+      BLEDevice::getScan()->start(3, false); // 切断時は3秒間だけ再スキャン
     }
   }
 
   // 未接続状態での再スキャン制御
   static unsigned long lastScanTime = 0;
-  const long scanInterval = 8000;  // スキャン間隔（8秒）
+  const long scanInterval = 30000;  // スキャン間隔を30秒に広げる（通信干渉を減らす）
+  const int scanDuration = 3;       // スキャン時間を3秒に短縮する（以前は10秒）
   
   bool needRescan = false;
   for (int i = 0; i < 4; i++) {
@@ -440,7 +441,8 @@ void loop() {
   
   if (needRescan && (millis() - lastScanTime >= scanInterval)) {
     lastScanTime = millis();
-    BLEDevice::getScan()->start(10, false);  // 10秒間スキャン
+    // 非同期ではないスキャンはループを止めるため、時間は最小限に
+    BLEDevice::getScan()->start(scanDuration, false);
   }
   
   delay(10);  // 短い遅延でCPU使用率を下げる（100ms -> 10ms）
